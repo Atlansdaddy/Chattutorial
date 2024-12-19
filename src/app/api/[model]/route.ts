@@ -33,6 +33,14 @@ function convertToAnthropicMessages(messages: Message[]) {
   })) as { role: 'user' | 'assistant'; content: string }[];
 }
 
+// Convert our messages to Gemini format
+function convertToGeminiMessages(messages: Message[]) {
+  return messages.map(message => ({
+    role: message.role === 'user' ? 'user' : 'model',
+    parts: [{ text: message.content }]
+  }));
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { model: string } }
@@ -45,27 +53,51 @@ export async function POST(
       case 'openai':
         const openaiMessages = convertToOpenAIMessages(messages);
         const openaiResponse = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: 'gpt-4-turbo-preview',
           messages: openaiMessages,
+          temperature: 0.7,
+          max_tokens: 1000,
         });
         return NextResponse.json({ content: openaiResponse.choices[0].message.content });
 
       case 'anthropic':
         const anthropicMessages = convertToAnthropicMessages(messages);
         const anthropicResponse = await anthropic.messages.create({
-          model: 'claude-3-5-sonnet-latest',
+          model: 'claude-3-opus-20240229',
           messages: anthropicMessages,
           max_tokens: 1024,
+          temperature: 0.7,
         });
         return NextResponse.json({ content: anthropicResponse.content[0].text });
 
       case 'gemini':
-        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-        const geminiChat = geminiModel.startChat();
+        const geminiModel = genAI.getGenerativeModel({
+          model: 'gemini-pro',
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000,
+            topP: 0.8,
+            topK: 40,
+          },
+        });
+
+        // Start a chat session
+        const chat = geminiModel.startChat({
+          history: convertToGeminiMessages(messages.slice(0, -1)),
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000,
+            topP: 0.8,
+            topK: 40,
+          },
+        });
+
+        // Send the last message
         const lastMessage = messages[messages.length - 1];
-        const geminiResponse = await geminiChat.sendMessage(lastMessage.content);
+        const geminiResponse = await chat.sendMessage(lastMessage.content);
         const geminiResult = await geminiResponse.response;
         const content = geminiResult.text();
+        
         return NextResponse.json({ content: content || '' });
 
       default:
